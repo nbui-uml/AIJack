@@ -1,13 +1,22 @@
 """Malicious client for FedAVG scheme"""
 
+from __future__ import annotations
+
 import copy
+import pickle
+
+import numpy as np
+import torch
+import torch.types
+import torch.utils
+import torch.utils.data
 
 from .miface import MI_FACE
 
-from ...manager import BaseManager
 from ...collaborative.core import BaseClient
 from ...collaborative.core.utils import GRADIENTS_TAG, PARAMETERS_TAG
 from ...collaborative.optimizer import AdamFLOptimizer, SGDFLOptimizer
+
 
 class MIFaceFedAVGClient(BaseClient):
     """Client of FedAVG for single process simulation
@@ -25,7 +34,7 @@ class MIFaceFedAVGClient(BaseClient):
 
     def __init__(
         self,
-        model,
+        model: torch.nn.Module,
         user_id=0,
         lr=0.1,
         send_gradient=True,
@@ -33,19 +42,6 @@ class MIFaceFedAVGClient(BaseClient):
         server_side_update=True,
         optimizer_kwargs_for_global_grad={},
         device="cpu",
-        input_shape=(1, 1, 64, 64),
-        target_label=0,
-        lam=0.1,
-        num_itr=100,
-        beta=None,
-        gamma=None,
-        auxterm_func=lambda x: 0,
-        process_func=lambda x: x,
-        apply_softmax=False,
-        log_interval=1,
-        log_show_img=False,
-        show_img_func=lambda x: x * 0.5 + 0.5,
-        black_box=False
     ):
         super(MIFaceFedAVGClient, self).__init__(model, user_id=user_id)
         self.lr = lr
@@ -64,25 +60,14 @@ class MIFaceFedAVGClient(BaseClient):
 
         self.initialized = False
 
-        self.miface = MI_FACE(
-            self.model,
-            input_shape=input_shape,
-            target_label=target_label,
-            lam=lam,
-            num_itr=num_itr,
-            beta=beta,
-            gamma=gamma,
-            auxterm_func=auxterm_func,
-            process_func=process_func,
-            apply_softmax=apply_softmax,
-            device=device,
-            log_interval=log_interval,
-            log_show_img=log_show_img,
-            show_img_func=show_img_func,
-            black_box=black_box
-        )
+        self.epoch = 0
+        self.mi_face = None
+        self.mi_logfn = None
+        self.mi_start_epoch = 1
+        self.mi_atk_interval = 1
+        self.mi_num_atk = 0
 
-    def _setup_optimizer_for_global_grad(self, optimizer_type, **kwargs):
+    def _setup_optimizer_for_global_grad(self, optimizer_type: str, **kwargs):
         if optimizer_type == "sgd":
             self.optimizer_for_gloal_grad = SGDFLOptimizer(
                 self.model.parameters(), lr=self.lr, **kwargs
@@ -97,6 +82,26 @@ class MIFaceFedAVGClient(BaseClient):
             raise NotImplementedError(
                 f"{optimizer_type} is not supported. You can specify `sgd`, `adam`, or `none`."
             )
+
+    def attach_mi_face(
+        self, mi_face: MI_FACE, log_fn: str, start_epoch=1, atk_interval=1, num_atk=1
+    ):
+        """
+        Attach MI_Face attack to client
+
+        Args:
+            mi_face (MI_Face): MI_Face API object
+            log_fn (str | path): file to store pickled MIFaceFedAVGLog object
+            start_epoch (int): epoch to start launching attack
+            atk_interval (int): number of epochs between consecutive attacks
+            num_attack (int): number of attacks to perform total
+        """
+        self.mi_face = mi_face
+        self.mi_logfn = log_fn
+        self.mi_start_epoch = start_epoch
+        self.mi_atk_interval = atk_interval
+        self.mi_num_atk = num_atk
+        self.mi_log = MIFaceFedAVGLog()
 
     def upload(self):
         """Upload the current local model state"""
@@ -122,7 +127,10 @@ class MIFaceFedAVGClient(BaseClient):
             if param is not None:
                 param = prev_param
 
-    def download(self, new_global_model):
+                # decrement the epoch count to the previous model's
+                self.epoch += -1
+
+    def download(self, new_global_model: torch.nn.Module):
         """Download the new global model"""
         if self.server_side_update or (not self.initialized):
             # receive the new global model as the model state
@@ -140,8 +148,16 @@ class MIFaceFedAVGClient(BaseClient):
             self.prev_parameters.append(copy.deepcopy(param))
 
     def local_train(
-        self, local_epoch, criterion, trainloader, optimizer, communication_id=0
+        self,
+        local_epoch: int,
+        criterion: function,
+        trainloader: torch.utils.data.DataLoader,
+        optimizer,
+        communication_id=0,
     ):
+        """
+        Train local model on data and perform attack if applicable.
+        """
         loss_log = []
 
         for _ in range(local_epoch):
@@ -166,41 +182,30 @@ class MIFaceFedAVGClient(BaseClient):
 
             loss_log.append(running_loss / running_data_num)
 
+        self.epoch += 1
+        if (
+            self.mi_num_atk > 0
+            and self.epoch >= self.mi_start_epoch
+            and (self.epoch - self.mi_start_epoch) % self.mi_atk_interval == 0
+        ):
+            im, log = self.mi_face.attack()
+            self.mi_log.append(MIFaceFedAVGEntry(im, min(log), self.epoch))
+            with open(self.mi_logfn, "wb") as fout:
+                pickle.dump(self.mi_log, fout)
+
         return loss_log
 
 
-def attach_mpi_to_fedavgclient(cls):
-    class MPIFedAVGClientWrapper(cls):
-        def __init__(self, comm, *args, **kwargs):
-            super(MPIFedAVGClientWrapper, self).__init__(*args, **kwargs)
-            self.comm = comm
+class MIFaceFedAVGLog(list):
+    def __init__(self):
+        super(MIFaceFedAVGLog, self).__init__()
 
-        def action(self):
-            self.upload()
-            self.model.zero_grad()
-            self.download()
-
-        def upload(self):
-            self.upload_gradient()
-
-        def upload_gradient(self, destination_id=0):
-            self.comm.send(
-                super(MPIFedAVGClientWrapper, self).upload_gradients(),
-                dest=destination_id,
-                tag=GRADIENTS_TAG,
-            )
-
-        def download(self):
-            super(MPIFedAVGClientWrapper, self).download(
-                self.comm.recv(tag=PARAMETERS_TAG)
-            )
-
-        def mpi_initialize(self):
-            self.download()
-
-    return MPIFedAVGClientWrapper
+    def append(self, entry: MIFaceFedAVGEntry):
+        super(MIFaceFedAVGLog, self).append(entry)
 
 
-class MPIFedAVGClientManager(BaseManager):
-    def attach(self, cls):
-        return attach_mpi_to_fedavgclient(cls, *self.args, **self.kwargs)
+class MIFaceFedAVGEntry:
+    def __init__(self, im: np.typing.ArrayLike, c: float, epoch: int):
+        self.im = im
+        self.c = c
+        self.epoch = epoch
