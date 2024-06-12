@@ -52,6 +52,14 @@ aijack.attack.inversion.mi\_face module
    :undoc-members:
    :show-inheritance:
 
+aijack.attack.inversion.mi\_face\_fedavg\_client
+---------------------------------------------
+
+.. automodule:: aijack.attack.inversion.mi_face_fedavg_client
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
 Module contents
 ---------------
 

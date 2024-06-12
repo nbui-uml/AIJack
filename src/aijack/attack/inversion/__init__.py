@@ -9,8 +9,11 @@ from .gradientinversion_server import GradientInversionAttackServerManager  # no
 from .gradientinversion_server import (  # noqa: F401
     attach_gradient_inversion_attack_to_server,
 )
-from .mi_face import MI_FACE  # noqa: F401
 from .utils import DataRepExtractor  # noqa: F401
+from .miface import MI_FACE
+from .mi_face_fedavg_client import MIFaceFedAVGClient
+
+# from .mi_face import MI_FACE  # noqa: F401
 
 __all__ = [
     "GANAttackClientManager",
@@ -20,5 +23,6 @@ __all__ = [
     "GradientInversionAttackServerManager",
     "attach_gradient_inversion_attack_to_server",
     "MI_FACE",
+    "MIFaceFedAVGClient",
     "DataRepExtractor",
 ]

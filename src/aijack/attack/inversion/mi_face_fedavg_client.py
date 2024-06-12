@@ -19,7 +19,7 @@ from ...collaborative.optimizer import AdamFLOptimizer, SGDFLOptimizer
 
 
 class MIFaceFedAVGClient(BaseClient):
-    """Client of FedAVG for single process simulation
+    """Client of FedAVG for single process simulation with MI-Face attack
 
     Args:
         model (torch.nn.Module): local model
@@ -97,6 +97,9 @@ class MIFaceFedAVGClient(BaseClient):
             num_attack (int): number of attacks to perform total
         """
         self.mi_face = mi_face
+        self.mi_face.target_model = self.model 
+        # need a way to pass the model through dynamically as it's being trained
+
         self.mi_logfn = log_fn
         self.mi_start_epoch = start_epoch
         self.mi_atk_interval = atk_interval
