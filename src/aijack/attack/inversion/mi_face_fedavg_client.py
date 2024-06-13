@@ -69,15 +69,15 @@ class MIFaceFedAVGClient(BaseClient):
 
     def _setup_optimizer_for_global_grad(self, optimizer_type: str, **kwargs):
         if optimizer_type == "sgd":
-            self.optimizer_for_gloal_grad = SGDFLOptimizer(
+            self.optimizer_for_global_grad = SGDFLOptimizer(
                 self.model.parameters(), lr=self.lr, **kwargs
             )
         elif optimizer_type == "adam":
-            self.optimizer_for_gloal_grad = AdamFLOptimizer(
+            self.optimizer_for_global_grad = AdamFLOptimizer(
                 self.model.parameters(), lr=self.lr, **kwargs
             )
         elif optimizer_type == "none":
-            self.optimizer_for_gloal_grad = None
+            self.optimizer_for_global_grad = None
         else:
             raise NotImplementedError(
                 f"{optimizer_type} is not supported. You can specify `sgd`, `adam`, or `none`."
@@ -138,7 +138,7 @@ class MIFaceFedAVGClient(BaseClient):
         else:
             # receive the new global model as the global gradients
             self.revert()
-            self.optimizer_for_gloal_grad.step(new_global_model)
+            self.optimizer_for_global_grad.step(new_global_model)
 
         if not self.initialized:
             self.initialized = True
@@ -160,40 +160,39 @@ class MIFaceFedAVGClient(BaseClient):
         """
         loss_log = []
 
-        for _ in range(local_epoch):
-            running_loss = 0.0
-            running_data_num = 0
-            for _, data in enumerate(trainloader, 0):
-                inputs, labels = data
-                inputs = inputs.to(self.device)
-                labels = labels.to(self.device)
+        # for _ in range(local_epoch):
+        #     running_loss = 0.0
+        #     running_data_num = 0
+        #     for _, data in enumerate(trainloader, 0):
+        #         inputs, labels = data
+        #         inputs = inputs.to(self.device)
+        #         labels = labels.to(self.device)
 
-                optimizer.zero_grad()
-                self.zero_grad()
+        #         optimizer.zero_grad()
+        #         self.zero_grad()
 
-                outputs = self(inputs)
-                loss = criterion(outputs, labels)
+        #         outputs = self(inputs)
+        #         loss = criterion(outputs, labels)
 
-                loss.backward()
-                optimizer.step()
+        #         loss.backward()
+        #         optimizer.step()
 
-                running_loss += loss.item()
-                running_data_num += inputs.shape[0]
+        #         running_loss += loss.item()
+        #         running_data_num += inputs.shape[0]
 
-            loss_log.append(running_loss / running_data_num)
+        #     loss_log.append(running_loss / running_data_num)
 
         self.epoch += 1
         if (
-            self.mi_num_atk > 0
+            (self.mi_num_atk > 0 or self.mi_num_atk == None)
             and self.epoch >= self.mi_start_epoch
             and (self.epoch - self.mi_start_epoch) % self.mi_atk_interval == 0
         ):
-            miface = MI_FACE(
-                self.model,
-                **(self.mi_face_kwargs)
-            )
+            miface = MI_FACE(self.model, device=self.device, **(self.mi_face_kwargs))
             im, log = miface.attack()
-            self.mi_log.append(MIFaceFedAVGEntry(im, min(log), self.epoch))
+            self.mi_log.append(
+                MIFaceFedAVGEntry(torch.Tensor.cpu(im), min(log), self.epoch)
+            )
             with open(self.mi_logfn, "wb") as fout:
                 pickle.dump(self.mi_log, fout)
 
