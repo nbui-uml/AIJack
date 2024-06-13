@@ -61,7 +61,7 @@ class MIFaceFedAVGClient(BaseClient):
         self.initialized = False
 
         self.epoch = 0
-        self.mi_face = None
+        self.mi_face_kwargs = None
         self.mi_logfn = None
         self.mi_start_epoch = 1
         self.mi_atk_interval = 1
@@ -84,22 +84,19 @@ class MIFaceFedAVGClient(BaseClient):
             )
 
     def attach_mi_face(
-        self, mi_face: MI_FACE, log_fn: str, start_epoch=1, atk_interval=1, num_atk=1
+        self, log_fn: str, start_epoch=1, atk_interval=1, num_atk=1, **kwargs
     ):
         """
         Attach MI_Face attack to client
 
         Args:
-            mi_face (MI_Face): MI_Face API object
             log_fn (str | path): file to store pickled MIFaceFedAVGLog object
             start_epoch (int): epoch to start launching attack
             atk_interval (int): number of epochs between consecutive attacks
             num_attack (int): number of attacks to perform total
+            **kwargs: keyword arguments to pass to MI-Face object
         """
-        self.mi_face = mi_face
-        self.mi_face.target_model = self.model 
-        # need a way to pass the model through dynamically as it's being trained
-
+        self.mi_face_kwargs = kwargs
         self.mi_logfn = log_fn
         self.mi_start_epoch = start_epoch
         self.mi_atk_interval = atk_interval
@@ -191,7 +188,11 @@ class MIFaceFedAVGClient(BaseClient):
             and self.epoch >= self.mi_start_epoch
             and (self.epoch - self.mi_start_epoch) % self.mi_atk_interval == 0
         ):
-            im, log = self.mi_face.attack()
+            miface = MI_FACE(
+                self.model,
+                **(self.mi_face_kwargs)
+            )
+            im, log = miface.attack()
             self.mi_log.append(MIFaceFedAVGEntry(im, min(log), self.epoch))
             with open(self.mi_logfn, "wb") as fout:
                 pickle.dump(self.mi_log, fout)
