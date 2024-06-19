@@ -56,6 +56,8 @@ class FedAVGAPI(BaseFedAPI):
 
         self.logging = {}
 
+        self.global_epoch = 0
+
     def local_train(self, i):
         self.logging[i] = {}
 
@@ -84,6 +86,7 @@ class FedAVGAPI(BaseFedAPI):
             self.server.distribute()
 
             self.custom_action(self)
+            self.global_epoch += 1
 
 
 class MPIFedAVGAPI(BaseFedAPI):
