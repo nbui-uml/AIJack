@@ -113,7 +113,7 @@ class MI_FACE:
         log_interval=0,
         log_show_img=False,
         show_img_func=lambda x: x * 0.5 + 0.5,
-        black_box=False,
+        black_box=False
     ):
         """Inits MI_FACE
         Args:

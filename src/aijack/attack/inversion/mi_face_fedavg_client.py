@@ -59,6 +59,7 @@ class MIFaceFedAVGClient(BaseClient):
             self.prev_parameters.append(copy.deepcopy(param))
 
         self.initialized = False
+        self.participate = True
 
         self.epoch = 0
         self.mi_face_kwargs = None
@@ -84,7 +85,14 @@ class MIFaceFedAVGClient(BaseClient):
             )
 
     def attach_mi_face(
-        self, log_fn: str, start_epoch=1, atk_interval=1, num_atk=1, **kwargs
+        self,
+        log_fn: str,
+        start_epoch=1,
+        atk_interval=1,
+        num_atk=1,
+        init_x=None,
+        participate=False,
+        **kwargs,
     ):
         """
         Attach MI_Face attack to client
@@ -94,6 +102,8 @@ class MIFaceFedAVGClient(BaseClient):
             start_epoch (int): epoch to start launching attack
             atk_interval (int): number of epochs between consecutive attacks
             num_attack (int): number of attacks to perform total
+            init_x (None | tensor): initial input for MI-Face attack
+            participate (bool): determines if client will participate in training model
             **kwargs: keyword arguments to pass to MI-Face object
         """
         self.mi_face_kwargs = kwargs
@@ -101,6 +111,8 @@ class MIFaceFedAVGClient(BaseClient):
         self.mi_start_epoch = start_epoch
         self.mi_atk_interval = atk_interval
         self.mi_num_atk = num_atk
+        self.mi_init_x = init_x
+        self.participate = participate
         self.mi_log = MIFaceFedAVGLog()
 
     def upload(self):
@@ -160,27 +172,28 @@ class MIFaceFedAVGClient(BaseClient):
         """
         loss_log = []
 
-        # for _ in range(local_epoch):
-        #     running_loss = 0.0
-        #     running_data_num = 0
-        #     for _, data in enumerate(trainloader, 0):
-        #         inputs, labels = data
-        #         inputs = inputs.to(self.device)
-        #         labels = labels.to(self.device)
+        if self.participate:
+            for _ in range(local_epoch):
+                running_loss = 0.0
+                running_data_num = 0
+                for _, data in enumerate(trainloader, 0):
+                    inputs, labels = data
+                    inputs = inputs.to(self.device)
+                    labels = labels.to(self.device)
 
-        #         optimizer.zero_grad()
-        #         self.zero_grad()
+                    optimizer.zero_grad()
+                    self.zero_grad()
 
-        #         outputs = self(inputs)
-        #         loss = criterion(outputs, labels)
+                    outputs = self(inputs)
+                    loss = criterion(outputs, labels)
 
-        #         loss.backward()
-        #         optimizer.step()
+                    loss.backward()
+                    optimizer.step()
 
-        #         running_loss += loss.item()
-        #         running_data_num += inputs.shape[0]
+                    running_loss += loss.item()
+                    running_data_num += inputs.shape[0]
 
-        #     loss_log.append(running_loss / running_data_num)
+                loss_log.append(running_loss / running_data_num)
 
         self.epoch += 1
         if (
@@ -189,7 +202,7 @@ class MIFaceFedAVGClient(BaseClient):
             and (self.epoch - self.mi_start_epoch) % self.mi_atk_interval == 0
         ):
             miface = MI_FACE(self.model, device=self.device, **(self.mi_face_kwargs))
-            im, log = miface.attack()
+            im, log = miface.attack(self.mi_init_x)
             self.mi_log.append(
                 MIFaceFedAVGEntry(torch.Tensor.cpu(im), min(log), self.epoch)
             )
